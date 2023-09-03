@@ -1,15 +1,23 @@
 from fastapi import FastAPI 
+from fastapi.responses import RedirectResponse
 from routes.users import user_router 
 from routes.events import event_router 
 import uvicorn 
+from database.connection import conn 
+
 
 app=FastAPI()
 
+@app.on_event("startup")
+def on_startup():
+    conn()
+
 @app.get("/")
-async def hello()->dict:
-    return {
-        "message":"hello world!"
-    }
+async def home()->dict:
+    return RedirectResponse(url="/event/")
+    # return {
+    #     "message":"hello world!"
+    # }
 
 #라우터 등록 
 app.include_router(user_router,prefix="/user")
