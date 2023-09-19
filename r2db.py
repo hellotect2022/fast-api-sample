@@ -5,14 +5,46 @@ from datetime import datetime
 import time 
 import pymysql
 import json
-
+import asyncio
 
 class User:
     def insert(self, vo):
         self.conn = pymysql.connect(host='localhost', user='dhhan', password='0000', db='fastapi', charset='utf8')
         cur = self.conn.cursor()
-        sql = "insert into users values(%s, %s)"
-        vals = (vo.id, vo.name)
+        #sql = "insert into user values(%s, %s, %s, %s, 'Y')"
+        sql = ''' INSERT INTO user (id, name, createtime, type, useYn) 
+                    VALUES (%s, %s, %s, %s, 'Y') 
+                    ON DUPLICATE KEY UPDATE 
+                    name = VALUES(name),  -- 중복되는 경우 name 열을 업데이트
+                    createtime = VALUES(createtime),
+                    type = 'insert',
+                    useYn = 'Y'
+                '''
+        vals = (vo.id, vo.name, vo.createTime, vo.type)
+        cur.execute(sql, vals)
+        self.conn.commit()
+        self.conn.close()
+    def update(self, vo):
+        self.conn = pymysql.connect(host='localhost', user='dhhan', password='0000', db='fastapi', charset='utf8')
+        cur = self.conn.cursor()
+        sql = "update user set name=%s, createTime=%s, type=%s where id=%s and createTime < %s and useYn ='Y'" 
+        vals = (vo.name, vo.createTime, vo.type ,vo.id, vo.createTime)
+        cur.execute(sql, vals)
+        self.conn.commit()
+        self.conn.close()
+    def update2(self, vo):
+        self.conn = pymysql.connect(host='localhost', user='dhhan', password='0000', db='fastapi', charset='utf8')
+        cur = self.conn.cursor()
+        sql = "update user set name=%s, createTime=%s, type=%s, useYn ='N' where id=%s and createTime < %s and useYn='Y'"
+        vals = (vo.name, vo.createTime, vo.type ,vo.id, vo.createTime)
+        cur.execute(sql, vals)
+        self.conn.commit()
+        self.conn.close()
+    def delete(self, vo):
+        self.conn = pymysql.connect(host='localhost', user='dhhan', password='0000', db='fastapi', charset='utf8')
+        cur = self.conn.cursor()
+        sql = "delete from user where id=%s"
+        vals = (vo.id)
         cur.execute(sql, vals)
         self.conn.commit()
         self.conn.close()
@@ -21,50 +53,49 @@ class MyObject:
     def __init__(self, data):
         self.__dict__ = data
 
-def add_data_to_db():
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    value= r.lrange("user",0,-1)
-    
-    element = r.lpop("user")
-    if element:
-        #r.lpush("user",element)
-        json_str = element.decode('utf-8')
-        
-        jsonobj = json.loads(json_str)
-        obj = MyObject(jsonobj)
-        user=User()
-        user.insert(obj)
-        print(f"insert to db {obj.id}, {obj.name}")
-    else:
-        print("redis에 값이 없습니다.")
+async def insert_redis_to_db():
+    try :
 
-#scheduler = BackgroundScheduler()
-#scheduler.add_job(add_data_to_db,'interval',seconds=2)
-#scheduler.start()
+        if r.llen("user-call") > 0:
+
+            for i in range(r.llen("user-call")):
+                #element = r.lindex("user-call", i)
+                element = r.lpop("user-call")
+                print(i," : ",element)
+                jsonobj = json.loads(element)
+                print(i," 22: ",jsonobj)
+                obj = MyObject(jsonobj)
+                user=User()
+                
+                if obj.type == "insert":
+                    user.insert(obj)
+                elif obj.type == "delete":
+                    user.update2(obj)
+                elif obj.type == "update":
+                    user.update(obj)
+                print(f"{obj.type} to db {obj.id}, {obj.name}")
+                
+                #r.lrem("user-call",1,r.lindex("user-call", i))
+        else:
+            print("redis에 값이 없습니다.")
+    except Exception as e:
+        print("redis 에서 이상발생.",e)
+
 r=redis.Redis(host='localhost',port=6379,db=0)
 
 
-#try:
-    # 스케줄러가 계속 실행되도록 유지
-#    while True:
-#        pass
-#except (KeyboardInterrupt, SystemExit):
-    # Ctrl+C 또는 종료 시 스케줄러 정지
-#    scheduler.shutdown()
-
-def test():
+async def test():
     try:
         while True:
-            add_data_to_db()
-            time.sleep(2) 
+            await asyncio.sleep(10)
+            await insert_redis_to_db()
     except (KeyboardInterrupt, SystemExit):
         print("종료합니다.ㅋㅋ")
 
-    #scheduler = BackgroundScheduler()
-    #scheduler.add_job(add_data_to_db,'interval',seconds=1)
-    #scheduler.start()
-
-
+async def printt(text):
+    print(text)
 
 if __name__ == "__main__":
-    test()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(test())
+    loop.close()
