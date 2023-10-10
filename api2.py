@@ -3,9 +3,12 @@
 from fastapi import FastAPI, APIRouter
 import uvicorn
 import redis
+from redis.exceptions import ConnectionError
 import json
 import pymysql
+import time
 from datetime import datetime
+from database.myDB import Database
 
 app=FastAPI()
 router=APIRouter()
@@ -114,13 +117,29 @@ async def retrieve_todo() -> dict:
     todo_list=r.get("todo")
     return {"todos":todo_list}
 
+def redis_state_check() -> bool:
+    redisCheck = True
+    while redisCheck:
+        time.sleep(3)
+        try:
+            r.ping()
+            print("Redis 서버 연결 성공")
+            redisCheck = False
+        except ConnectionError as e:
+            print("Redis 서버 연결 실패:", e)
+            redisCheck = True
+        except Exception as e:
+            print("다른 예외 발생:", e) 
+            redisCheck = True      
+
 def redis_check() -> dict:
+
+    # redis 민 후 db 연결
     r.flushall()
     cur = conn.cursor()
     sql = "select * from user where useYn='Y' "
     cur.execute(sql)
     dbList = cur.fetchall()
-    print("cur",dbList[0])
     conn.commit()
     conn.close()
    
@@ -138,5 +157,27 @@ def redis_check() -> dict:
 app.include_router(router, prefix="")
 
 if __name__ == "__main__":
-    redis_check()
+    redis_state_check()
+    my_db = Database()
+
+    # db 에서 최신 날짜 비교 
+    db_date = my_db.selectLastCreateTime()
+
+    #backupfromDB = False
+    if db_date is not None:
+        userList = r.lrange("user",0,-1)
+        if len(userList) > 0:
+            redis_time = datetime(1970, 1, 1)
+            for value in userList:
+                redis_time_str = json.loads(value)["createTime"]
+                if redis_time < datetime.strptime(redis_time_str, "%Y-%m-%d %H:%M:%S.%f"):
+                    redis_time = datetime.strptime(redis_time_str, "%Y-%m-%d %H:%M:%S.%f")
+            if db_date > redis_time :
+                print("db 값이 가장최신입니다.")
+                redis_check()
+            else :
+                print("redis 값이 가장최신입니다.")
+        else :
+            print("redis 에 값이 없어서 db에서 백업합니다.")
+            redis_check()            
     uvicorn.run(app, host="0.0.0.0", port=8000)
